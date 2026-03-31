@@ -57,7 +57,7 @@ media/
 staticfiles/
 
 # If your project uses a virtualenv inside the repo
-.python-version
+
 
 # VS Code
 .vscode/
