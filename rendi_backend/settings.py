@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ------------------------------------------------------------------
 SECRET_KEY = os.getenv("SECRET_KEY")
 DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="localhost").split(",")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", default="localhost").split(",")
 
 # ------------------------------------------------------------------
 # Applications
@@ -145,7 +145,7 @@ SIMPLE_JWT = {
 # ------------------------------------------------------------------
 # CORS — for Next.js frontend
 # ------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = config(
+CORS_ALLOWED_ORIGINS = os.getenv(
     "CORS_ALLOWED_ORIGINS",
     default="http://localhost:3000"
 ).split(",")
