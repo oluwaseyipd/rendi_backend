@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from decouple import config
 from datetime import timedelta
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -100,6 +101,14 @@ DATABASES = {
             'sslmode': 'require',
         },
     }
+}
+
+DATABASES = {
+    'default': dj_database_url.config(
+        default=config('DB_URL'),
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
 
 # ------------------------------------------------------------------
