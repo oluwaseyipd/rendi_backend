@@ -4,17 +4,22 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+asgiref = "==3.11.1"
+dj-database-url = "==3.1.2"
+django = "==5.1.7"
+django-cors-headers = "==4.9.0"
 djangorestframework = "==3.16.1"
 djangorestframework-simplejwt = "==5.5.1"
-django-cors-headers = "==4.9.0"
-python-decouple = "==3.8"
+gunicorn = "==25.3.0"
+packaging = "==26.0"
 pillow = "==12.1.1"
-django = "==5.1.7"
-gunicorn = "*"
-whitenoise = "*"
-psycopg2-binary = "*"
-dj-database-url = "*"
-python-dotenv = "*"
+psycopg2-binary = "==2.9.11"
+pyjwt = "==2.12.1"
+python-decouple = "==3.8"
+python-dotenv = "==1.2.2"
+sqlparse = "==0.5.5"
+tzdata = "==2025.3"
+whitenoise = "==6.12.0"
 
 [dev-packages]
 
