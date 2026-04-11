@@ -26,8 +26,8 @@ class Assessment(models.Model):
     has_missed_payments = models.BooleanField(null=True, blank=True)
 
     # --- Core outputs ---
-    score = models.PositiveSmallIntegerField()   # 0–100
-    status = models.CharField(max_length=50)     # "Early stages" | "Getting closer" | "Nearly ready"
+    score = models.PositiveSmallIntegerField()
+    status = models.CharField(max_length=50)
     time_estimate = models.CharField(max_length=100)
 
     # --- Deposit helpers ---
@@ -35,10 +35,26 @@ class Assessment(models.Model):
     deposit_gap = models.DecimalField(max_digits=12, decimal_places=2)
     estimated_months = models.PositiveSmallIntegerField()
 
-    # --- Component breakdown (stored as JSON for flexibility) ---
+    # --- Component breakdown ---
     breakdown = models.JSONField(default=dict)
 
-    # --- Action plan ---
+    # --- Phase 1: Biggest blocker ---
+    # Stores the key of the component with the highest deficit
+    # e.g. "deposit" | "income" | "commitments" | "credit"
+    biggest_blocker = models.CharField(max_length=20, default="deposit")
+
+    # All 4 components ranked worst to best
+    blocker_priority = models.JSONField(default=list)
+
+    # --- Phase 1: Quantified personalised recommendations ---
+    # Replaces generic action_plan strings with calculated ones
+    recommendations = models.JSONField(default=list)
+
+    # --- Phase 1: Fastest-improvement simulations ---
+    # List of saving scenarios with revised timelines
+    simulations = models.JSONField(default=list)
+
+    # --- Legacy action plan (kept for backwards compatibility) ---
     action_plan = models.JSONField(default=list)
 
     # --- Timestamps ---
@@ -50,4 +66,8 @@ class Assessment(models.Model):
         verbose_name_plural = "Assessments"
 
     def __str__(self):
-        return f"{self.user.email} — {self.status} ({self.score}/100) @ {self.created_at:%Y-%m-%d %H:%M}"
+        return (
+            f"{self.user.email} — {self.status} ({self.score}/100) "
+            f"| Blocker: {self.biggest_blocker} "
+            f"@ {self.created_at:%Y-%m-%d %H:%M}"
+        )

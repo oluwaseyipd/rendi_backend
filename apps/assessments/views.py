@@ -14,10 +14,21 @@ from .rendi_scoring import ScoringInputs, calculate_readiness
 def _breakdown_to_dict(breakdown):
     """Converts a ComponentBreakdown dataclass to a plain dict for JSON storage."""
     return {
-        "points": breakdown.points,
+        "points":     breakdown.points,
         "max_points": breakdown.max_points,
-        "label": breakdown.label,
-        "value": breakdown.value,
+        "label":      breakdown.label,
+        "value":      breakdown.value,
+    }
+
+
+def _simulation_to_dict(sim):
+    """Converts a Simulation dataclass to a plain dict for JSON storage."""
+    return {
+        "monthly_saving": sim.monthly_saving,
+        "months_to_goal": sim.months_to_goal,
+        "months_saved":   sim.months_saved,
+        "label":          sim.label,
+        "summary":        sim.summary,
     }
 
 
@@ -27,8 +38,6 @@ class SubmitAssessmentView(APIView):
 
     Accepts user inputs, runs the scoring engine, persists the result,
     and returns the full scored assessment.
-
-    Requires: Bearer token authentication.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -50,6 +59,12 @@ class SubmitAssessmentView(APIView):
             ),
             has_ccj=data.get("has_ccj"),
             has_missed_payments=data.get("has_missed_payments"),
+            # Phase 1: optional declared saving ability
+            monthly_saving_ability=(
+                float(data["monthly_saving_ability"])
+                if data.get("monthly_saving_ability") is not None
+                else None
+            ),
         )
         result = calculate_readiness(scoring_inputs)
 
@@ -63,19 +78,26 @@ class SubmitAssessmentView(APIView):
             monthly_commitments=data.get("monthly_commitments"),
             has_ccj=data.get("has_ccj"),
             has_missed_payments=data.get("has_missed_payments"),
-            # outputs
+            # core outputs
             score=result.score,
             status=result.status,
             time_estimate=result.time_estimate,
             deposit_needed=result.deposit_needed,
             deposit_gap=result.deposit_gap,
             estimated_months=result.estimated_months,
+            # breakdown
             breakdown={
-                "deposit": _breakdown_to_dict(result.deposit_breakdown),
-                "income": _breakdown_to_dict(result.income_breakdown),
+                "deposit":     _breakdown_to_dict(result.deposit_breakdown),
+                "income":      _breakdown_to_dict(result.income_breakdown),
                 "commitments": _breakdown_to_dict(result.commitments_breakdown),
-                "credit": _breakdown_to_dict(result.credit_breakdown),
+                "credit":      _breakdown_to_dict(result.credit_breakdown),
             },
+            # Phase 1 new fields
+            biggest_blocker=result.biggest_blocker,
+            blocker_priority=result.blocker_priority,
+            recommendations=result.recommendations,
+            simulations=[_simulation_to_dict(s) for s in result.simulations],
+            # legacy
             action_plan=result.action_plan,
         )
 
@@ -99,9 +121,7 @@ class LatestAssessmentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        assessment = (
-            Assessment.objects.filter(user=request.user).first()
-        )
+        assessment = Assessment.objects.filter(user=request.user).first()
         if not assessment:
             return Response(
                 {"detail": "No assessments found. Submit one to get started."},
@@ -121,8 +141,8 @@ class AssessmentHistoryView(generics.ListAPIView):
     """
     GET /api/assessments/history/
 
-    Returns a paginated list of all past assessments for the authenticated user,
-    ordered newest first. Uses the lightweight list serializer.
+    Returns all past assessments for the authenticated user, newest first.
+    Uses the lightweight list serializer.
     """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AssessmentListSerializer
