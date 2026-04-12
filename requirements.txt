@@ -1,16 +1,35 @@
-asgiref==3.11.1
-dj-database-url==3.1.2
-Django==5.1.7
-django-cors-headers==4.9.0
+# Core
+Django>=5.1.7
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
-gunicorn==25.3.0
-packaging==26.0
-pillow==12.1.1
+
+# Database
 psycopg2-binary==2.9.11
-PyJWT==2.12.1
+dj-database-url==3.1.2
+
+# Server & static
+gunicorn==25.3.0
+whitenoise==6.12.0
+
+# Environment
 python-decouple==3.8
 python-dotenv==1.2.2
+
+# CORS
+django-cors-headers==4.9.0
+
+# Phase 3: Async task queue
+celery==5.3.6
+redis==5.0.1
+django-celery-beat>=2.7.0
+
+# Phase 3: Email
+sendgrid==6.11.0
+
+# Utilities
+Pillow==12.1.1
+PyJWT==2.12.1
+asgiref==3.11.1
 sqlparse==0.5.5
 tzdata==2025.3
-whitenoise==6.12.0
+packaging==26.0

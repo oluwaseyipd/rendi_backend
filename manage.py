@@ -4,7 +4,13 @@ import sys
 
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "rendi_backend.settings")
+    # Ensure the project root is always on sys.path
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    
+    os.environ.setdefault(
+        "DJANGO_SETTINGS_MODULE",
+        "rendi_backend.settings.development"
+    )
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:

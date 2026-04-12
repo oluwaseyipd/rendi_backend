@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,9 +12,10 @@ from .serializers import (
 )
 from .rendi_scoring import ScoringInputs, calculate_readiness
 
+logger = logging.getLogger(__name__)
+
 
 def _breakdown_to_dict(breakdown):
-    """Converts a ComponentBreakdown dataclass to a plain dict for JSON storage."""
     return {
         "points":     breakdown.points,
         "max_points": breakdown.max_points,
@@ -22,7 +25,6 @@ def _breakdown_to_dict(breakdown):
 
 
 def _simulation_to_dict(sim):
-    """Converts a Simulation dataclass to a plain dict for JSON storage."""
     return {
         "monthly_saving": sim.monthly_saving,
         "months_to_goal": sim.months_to_goal,
@@ -35,9 +37,6 @@ def _simulation_to_dict(sim):
 class SubmitAssessmentView(APIView):
     """
     POST /api/assessments/submit/
-
-    Accepts user inputs, runs the scoring engine, persists the result,
-    and returns the full scored assessment.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -59,7 +58,6 @@ class SubmitAssessmentView(APIView):
             ),
             has_ccj=data.get("has_ccj"),
             has_missed_payments=data.get("has_missed_payments"),
-            # Phase 1: optional declared saving ability
             monthly_saving_ability=(
                 float(data["monthly_saving_ability"])
                 if data.get("monthly_saving_ability") is not None
@@ -68,40 +66,63 @@ class SubmitAssessmentView(APIView):
         )
         result = calculate_readiness(scoring_inputs)
 
-        # 3. Persist assessment record
+        # 3. Get previous score for progress email trigger
+        previous = (
+            Assessment.objects.filter(user=request.user)
+            .order_by("-created_at")
+            .first()
+        )
+        previous_score = previous.score if previous else None
+
+        # 4. Persist assessment
         assessment = Assessment.objects.create(
             user=request.user,
-            # inputs
             annual_income=data["annual_income"],
             savings=data["savings"],
             target_property_price=data["target_property_price"],
             monthly_commitments=data.get("monthly_commitments"),
             has_ccj=data.get("has_ccj"),
             has_missed_payments=data.get("has_missed_payments"),
-            # core outputs
             score=result.score,
             status=result.status,
             time_estimate=result.time_estimate,
             deposit_needed=result.deposit_needed,
             deposit_gap=result.deposit_gap,
             estimated_months=result.estimated_months,
-            # breakdown
             breakdown={
                 "deposit":     _breakdown_to_dict(result.deposit_breakdown),
                 "income":      _breakdown_to_dict(result.income_breakdown),
                 "commitments": _breakdown_to_dict(result.commitments_breakdown),
                 "credit":      _breakdown_to_dict(result.credit_breakdown),
             },
-            # Phase 1 new fields
             biggest_blocker=result.biggest_blocker,
             blocker_priority=result.blocker_priority,
             recommendations=result.recommendations,
             simulations=[_simulation_to_dict(s) for s in result.simulations],
-            # legacy
             action_plan=result.action_plan,
         )
 
-        # 4. Return full result
+        # 5. Fire email tasks asynchronously
+        try:
+            from apps.emails.tasks import (
+                send_post_assessment_emails_task,
+                send_progress_email_task,
+            )
+            if previous_score is not None and result.score > previous_score:
+                # Returning user with score improvement — send progress email
+                send_progress_email_task.delay(
+                    request.user.pk, assessment.pk, previous_score
+                )
+            else:
+                # New submission — send full post-assessment suite
+                send_post_assessment_emails_task.delay(
+                    request.user.pk, assessment.pk
+                )
+        except Exception as exc:
+            # Never let email failures break the API response
+            logger.error("Email task dispatch failed: %s", exc)
+
+        # 6. Return result
         return Response(
             {
                 "disclaimer": result.disclaimer,
@@ -114,9 +135,6 @@ class SubmitAssessmentView(APIView):
 class LatestAssessmentView(APIView):
     """
     GET /api/assessments/latest/
-
-    Returns the most recent assessment for the authenticated user.
-    Returns 404 if the user has no assessments yet.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -140,9 +158,6 @@ class LatestAssessmentView(APIView):
 class AssessmentHistoryView(generics.ListAPIView):
     """
     GET /api/assessments/history/
-
-    Returns all past assessments for the authenticated user, newest first.
-    Uses the lightweight list serializer.
     """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AssessmentListSerializer
@@ -154,11 +169,43 @@ class AssessmentHistoryView(generics.ListAPIView):
 class AssessmentDetailView(generics.RetrieveAPIView):
     """
     GET /api/assessments/<id>/
-
-    Returns full detail for a single assessment belonging to the authenticated user.
     """
     permission_classes = [permissions.IsAuthenticated]
     serializer_class = AssessmentResultSerializer
 
     def get_queryset(self):
         return Assessment.objects.filter(user=self.request.user)
+
+
+class ComparisonView(APIView):
+    """
+    GET /api/assessments/compare/
+
+    Returns "How you compare" data for the user's latest assessment.
+    Falls back gracefully when there isn't enough data yet.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        assessment = Assessment.objects.filter(user=request.user).first()
+        if not assessment:
+            return Response(
+                {"detail": "Complete an assessment first to see how you compare."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        from .comparison import calculate_comparison
+        result = calculate_comparison(assessment)
+
+        return Response({
+            "has_data":        result.has_data,
+            "fallback_message": result.fallback_message,
+            "headline":        result.headline,
+            "headline_pct":    result.headline_pct,
+            "subtitle":        result.subtitle,
+            "savings_line":    result.savings_line,
+            "deposit_gap_line": result.deposit_gap_line,
+            "segment_label":   result.segment_label,
+            "total_users":     result.total_users,
+            "share_text":      result.share_text,
+        })

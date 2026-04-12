@@ -1,18 +1,15 @@
-import os
+"""
+rendi_backend/settings/base.py
+-------------------------------
+Settings shared across all environments.
+Do not import this file directly — import development.py or production.py.
+"""
+
 from pathlib import Path
-from decouple import config
 from datetime import timedelta
-import dj_database_url
+from decouple import config
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-# ------------------------------------------------------------------
-# Security
-# ------------------------------------------------------------------
-SECRET_KEY = os.getenv("SECRET_KEY")
-DEBUG = os.getenv("DEBUG", "False") == "True"
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", default="localhost").split(",")
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # ------------------------------------------------------------------
 # Applications
@@ -35,6 +32,7 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "apps.users",
     "apps.assessments",
+    "apps.emails",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -43,9 +41,9 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 # Middleware
 # ------------------------------------------------------------------
 MIDDLEWARE = [
-    "corsheaders.middleware.CorsMiddleware",          # must be first
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
-    'whitenoise.middleware.WhiteNoiseMiddleware', 
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -59,7 +57,8 @@ ROOT_URLCONF = "rendi_backend.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Include BASE_DIR so Django can find apps/emails/templates/
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -75,44 +74,7 @@ TEMPLATES = [
 WSGI_APPLICATION = "rendi_backend.wsgi.application"
 
 # ------------------------------------------------------------------
-# Database — PostgreSQL
-# ------------------------------------------------------------------
-
-# Using SQLite for local development 
-
-# DATABASES = {
-#     "default": {
-#         "ENGINE": "django.db.backends.sqlite3",
-#         "NAME": BASE_DIR / "db.sqlite3",
-#     }
-# }
-
-# Using PostgreSQL for production 
-
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME"),
-        "USER": os.getenv("DB_USER"),
-        "PASSWORD": os.getenv("DB_PASSWORD"),
-        "HOST": os.getenv("DB_HOST", default="localhost"),
-        "PORT": os.getenv("DB_PORT", default="5432"),
-        'OPTIONS': {
-            'sslmode': 'require',
-        },
-    }
-}
-
-DATABASES = {
-    'default': dj_database_url.config(
-        default=config('DB_URL'),
-        conn_max_age=600,
-        ssl_require=True
-    )
-}
-
-# ------------------------------------------------------------------
-# Auth — Custom User Model
+# Auth
 # ------------------------------------------------------------------
 AUTH_USER_MODEL = "users.User"
 
@@ -155,13 +117,8 @@ SIMPLE_JWT = {
 }
 
 # ------------------------------------------------------------------
-# CORS — for Next.js frontend
+# CORS
 # ------------------------------------------------------------------
-CORS_ALLOWED_ORIGINS = os.getenv(
-    "CORS_ALLOWED_ORIGINS",
-    default="http://localhost:3000"
-).split(",")
-
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOW_HEADERS = [
@@ -179,17 +136,49 @@ CORS_ALLOW_HEADERS = [
 # ------------------------------------------------------------------
 # Internationalisation
 # ------------------------------------------------------------------
-LANGUAGE_CODE = "en-gb"   # UK English (matches £ currency context)
+LANGUAGE_CODE = "en-gb"
 TIME_ZONE = "Europe/London"
 USE_I18N = True
 USE_TZ = True
 
 # ------------------------------------------------------------------
-# Static & Media
+# Static files
 # ------------------------------------------------------------------
-STATIC_URL = '/static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# ------------------------------------------------------------------
+# Email (SendGrid via SMTP — works in both envs, key differs)
+# ------------------------------------------------------------------
+EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
+EMAIL_HOST = "smtp.sendgrid.net"
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = "apikey"
+EMAIL_HOST_PASSWORD = config("SENDGRID_API_KEY", default="")
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="hello@rendi.co")
+EMAIL_FROM_NAME = config("EMAIL_FROM_NAME", default="Team Rendi")
+
+# Full sender string e.g. "Team Rendi <hello@rendi.co>"
+EMAIL_FROM = f"{EMAIL_FROM_NAME} <{DEFAULT_FROM_EMAIL}>"
+
+# ------------------------------------------------------------------
+# Celery
+# ------------------------------------------------------------------
+CELERY_TIMEZONE = "Europe/London"
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60
+
+# ------------------------------------------------------------------
+# Frontend URL (used in email links)
+# ------------------------------------------------------------------
+FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
+
+# ------------------------------------------------------------------
+# "How you compare" feature — minimum sample thresholds
+# ------------------------------------------------------------------
+COMPARISON_MIN_TOTAL_USERS = 100
+COMPARISON_MIN_SEGMENT_USERS = 30

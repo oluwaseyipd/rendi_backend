@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -9,6 +11,8 @@ from .serializers import (
     ChangePasswordSerializer,
     CustomTokenObtainPairSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RegisterView(generics.CreateAPIView):
@@ -23,6 +27,15 @@ class RegisterView(generics.CreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+
+        # Phase 3: fire welcome email asynchronously
+        try:
+            from apps.emails.tasks import send_welcome_email_task
+            send_welcome_email_task.delay(user.pk)
+        except Exception as exc:
+            # Never let email failure break registration
+            logger.error("Welcome email task failed for user %s: %s", user.pk, exc)
+
         return Response(
             {
                 "message": "Account created successfully.",
