@@ -9,6 +9,14 @@ from pathlib import Path
 from datetime import timedelta
 from decouple import config
 
+# -----------------------------------------------------------------
+#  PyMySQL setup to allow using MySQL with Django's MySQLdb backend
+# -----------------------------------------------------------------
+import pymysql
+pymysql.version_info = (2, 2, 1, "final", 0) # Mock the version Django wants
+pymysql.install_as_MySQLdb()
+
+
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # ------------------------------------------------------------------
