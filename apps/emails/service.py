@@ -147,6 +147,19 @@ def send_results_email(user, assessment) -> bool:
         "Focus on the area with the biggest impact on your score."
     )
 
+    # Phase 4: include referral link if user has one
+    referral_line = ""
+    try:
+        from apps.referrals.models import Referral
+        referral_obj = Referral.objects.filter(user=user).first()
+        if referral_obj:
+            referral_line = (
+                f"Know someone planning to buy a home? "
+                f"Invite them to compare their readiness: {referral_obj.referral_url}"
+            )
+    except Exception:
+        pass
+
     body = f"""Hi {user.first_name or 'there'},
 
 Your readiness score: {assessment.score}/100
@@ -160,6 +173,7 @@ Next step:
 
 View your full plan: {settings.FRONTEND_URL}/dashboard/result
 
+{referral_line}
 — Team Rendi
 
 This is an estimate for information only. Not financial advice."""
@@ -222,6 +236,20 @@ def send_progress_email(user, assessment, previous_score: int) -> bool:
         return False  # Only send on genuine improvement
 
     subject = "You're making real progress"
+
+    # Phase 4: include referral link
+    referral_line = ""
+    try:
+        from apps.referrals.models import Referral
+        referral_obj = Referral.objects.filter(user=user).first()
+        if referral_obj:
+            referral_line = (
+                f"Know someone on the same journey? "
+                f"Invite them to check their readiness: {referral_obj.referral_url}"
+            )
+    except Exception:
+        pass
+
     body = f"""Hi {user.first_name or 'there'},
 
 Your new score: {assessment.score}/100
@@ -231,6 +259,7 @@ You're closer to your goal.
 
 See your updated plan: {settings.FRONTEND_URL}/dashboard/result
 
+{referral_line}
 — Team Rendi
 
 This is an estimate for information only. Not financial advice."""

@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 class RegisterView(generics.CreateAPIView):
     """
     POST /api/auth/register/
-    Creates a new user account. No authentication required.
+
+    Creates a new user account.
+    Accepts an optional ?ref=<code> query param to track referral conversions.
     """
     serializer_class = RegisterSerializer
     permission_classes = [permissions.AllowAny]
@@ -28,12 +30,42 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
+        # Phase 4: detect referral code from query param or request body
+        # Frontend passes it as ?ref=<code> on the registration URL
+        ref_code = (
+            request.query_params.get("ref")
+            or request.data.get("referral_code")
+        )
+        if ref_code:
+            try:
+                from apps.referrals.models import Referral, ReferralConversion
+                referral = Referral.objects.get(code=ref_code)
+
+                # Record the conversion
+                ReferralConversion.objects.create(
+                    referral=referral,
+                    referred_user=user,
+                )
+
+                # Increment counters
+                referral.invite_count     = referral.invite_count + 1
+                referral.conversion_count = referral.conversion_count + 1
+                referral.save(update_fields=["invite_count", "conversion_count", "updated_at"])
+
+                logger.info(
+                    "Referral conversion recorded | referrer=%s | new_user=%s",
+                    referral.user.email,
+                    user.email,
+                )
+            except Exception as exc:
+                # Never let referral tracking break registration
+                logger.error("Referral tracking failed: %s", exc)
+
         # Phase 3: fire welcome email asynchronously
         try:
             from apps.emails.tasks import send_welcome_email_task
             send_welcome_email_task.delay(user.pk)
         except Exception as exc:
-            # Never let email failure break registration
             logger.error("Welcome email task failed for user %s: %s", user.pk, exc)
 
         return Response(
