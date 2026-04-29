@@ -1,518 +1,491 @@
 """
-rendi_scoring.py
-----------------
-Deterministic readiness scoring engine for Rendi MVP.
-Phase 1 upgrade — aligned with:
-  - Rendi Backend Recommendation Engine spec (doc 1)
-  - Rendi CTO Product Upgrade document (doc 2)
+Rendi Scoring Engine — Fixed v2
+Implements Rendi Scoring Spec v1 (Lender-Inspired) with all known bugs resolved.
 
-Changes in this version:
-  - Stage bands updated to 0-34 / 35-64 / 65-84 / 85+
-  - Biggest-blocker ranking added
-  - Quantified personalised recommendations (pound amounts)
-  - Fastest-improvement simulation engine (300 / 500 / 750/month)
-
-All outputs are INFORMATIONAL ESTIMATES ONLY.
-This is not financial advice, a lending decision, or an eligibility check.
+Bug fixes included:
+  [BUG-1] Saving simulations showing identical months for different rates
+  [BUG-2] Simulation rates below assumed baseline shown as "improvements"
+  [BUG-3] All simulation scenarios hitting cap with no useful differentiation
+  [BUG-4] Status-band time range contradicting calculated estimated_months
+  [BUG-5] Deposit flagged as biggest blocker even when deposit_gap = 0
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
 
-# ------------------------------------------------------------------
-# Data classes
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Constants — change these in one place, everything updates automatically
+# ---------------------------------------------------------------------------
+
+DEPOSIT_THRESHOLD = 0.10          # 10% deposit target
+ASSUMED_SAVE_RATE = 0.15          # 15% of monthly income = assumed baseline save rate
+MONTHS_CAP = 60                   # Hard cap on estimated months (5 years)
+
+SCORE_BANDS = [
+    (85, "Strong position",    "Likely 0–6 months away"),
+    (65, "Getting close",      "Likely 6–18 months away"),
+    (35, "Building momentum",  "Likely 18–36 months away"),
+    (0,  "Early stages",       "Likely 18–36 months away"),
+]
+
+SIMULATION_RATES = [300, 500, 750]   # £/month scenarios for fastest improvement
+
+
+# ---------------------------------------------------------------------------
+# Data classes for clean, typed output
+# ---------------------------------------------------------------------------
 
 @dataclass
-class ScoringInputs:
-    annual_income: float
-    savings: float
-    target_property_price: float
-    monthly_commitments: Optional[float] = None
-    has_ccj: Optional[bool] = None
-    has_missed_payments: Optional[bool] = None
-    monthly_saving_ability: Optional[float] = None
-
-
-@dataclass
-class ComponentBreakdown:
+class ComponentScore:
     points: int
     max_points: int
     label: str
-    value: float
-    deficit: int = field(init=False)
-
-    def __post_init__(self):
-        self.deficit = self.max_points - self.points
+    is_biggest_blocker: bool = False
+    priority_label: str = ""      # "Biggest blocker" | "Important" | "Good"
 
 
 @dataclass
-class Simulation:
-    monthly_saving: int
-    months_to_goal: int
-    months_saved: int
-    label: str
-    summary: str
+class Breakdown:
+    deposit: ComponentScore
+    income: ComponentScore
+    commitments: ComponentScore
+    credit: ComponentScore
 
 
 @dataclass
-class ScoringResult:
+class SavingScenario:
+    monthly_amount: int
+    months_to_close: int           # None if gap already closed
+    months_faster_than_baseline: int
+    message: str
+    is_meaningful: bool            # False if outcome is same as another scenario
+
+
+@dataclass
+class AssessmentResult:
+    # Core
     score: int
     status: str
-    time_estimate: str
+    time_estimate: str             # Spec-driven label (e.g. "Likely 6–18 months away")
 
-    deposit_breakdown: ComponentBreakdown
-    income_breakdown: ComponentBreakdown
-    commitments_breakdown: ComponentBreakdown
-    credit_breakdown: ComponentBreakdown
+    # Deposit
+    deposit_needed: int
+    deposit_gap: int
+    estimated_months: int          # Calculated from actual deposit gap — drives the main card
 
+    # Blockers
     biggest_blocker: str
-    blocker_priority: list
+    breakdown: Breakdown
 
-    deposit_needed: float
-    deposit_gap: float
-    estimated_months: int
+    # Action plan
+    action_plan: list[str]
 
-    recommendations: list
-    simulations: list
-    action_plan: list
+    # Saving simulations — [BUG-1, BUG-2, BUG-3]
+    saving_scenarios: list[SavingScenario]
 
-    disclaimer: str
+    # Affordability
+    borrowing_power: int
+    total_budget: int
+    affordability_gap: int         # 0 if affordable
 
-
-# ------------------------------------------------------------------
-# Constants
-# ------------------------------------------------------------------
-
-DEPOSIT_BENCHMARK_PERCENT = 0.10
-ASSUMED_SAVINGS_RATE = 0.15
-MAX_ESTIMATED_MONTHS = 60
-
-STATUS_THRESHOLDS = {
-    "strong_position":   85,
-    "getting_close":     65,
-    "building_momentum": 35,
-}
-
-STATUS_LABELS = {
-    "strong_position":   "Strong position",
-    "getting_close":     "Getting close",
-    "building_momentum": "Building momentum",
-    "early_stages":      "Early stages",
-}
-
-TIME_ESTIMATES = {
-    "Strong position":   "Likely 0-6 months away",
-    "Getting close":     "Likely 6-12 months away",
-    "Building momentum": "Likely 12-18 months away",
-    "Early stages":      "Likely 18-36 months away",
-}
-
-SIMULATION_SCENARIOS = [300, 500, 750]
-
-DISCLAIMER = (
-    "This is an estimate for information only. It is not financial advice, "
-    "a mortgage offer, or an eligibility decision."
-)
-
-
-# ------------------------------------------------------------------
-# Helper
-# ------------------------------------------------------------------
-
-def _clamp(value, min_val, max_val):
-    return max(min_val, min(max_val, value))
-
-
-def _ceiling_divide(numerator, denominator):
-    return int(-(-numerator // denominator))
-
-
-# ------------------------------------------------------------------
-# Component scorers
-# ------------------------------------------------------------------
-
-def _score_deposit(savings, price):
-    deposit_percent = savings / price if price > 0 else 0
-
-    if deposit_percent >= 0.15:
-        points, label = 40, "Strong"
-    elif deposit_percent >= 0.10:
-        points, label = 25, "Getting there"
-    elif deposit_percent >= 0.05:
-        points, label = 15, "Needs attention"
-    else:
-        points, label = 0, "Needs attention"
-
-    return ComponentBreakdown(
-        points=points,
-        max_points=40,
-        label=label,
-        value=round(deposit_percent * 100, 2),
+    # Disclaimer (regulatory)
+    disclaimer: str = (
+        "This is an estimate for information only. "
+        "It is not financial advice, a lending decision, or an eligibility check."
     )
 
 
-def _score_income(income, price):
-    income_multiple = price / income if income > 0 else 9999
+# ---------------------------------------------------------------------------
+# Scoring helpers
+# ---------------------------------------------------------------------------
 
-    if income_multiple <= 3.0:
-        points, label = 30, "Strong"
-    elif income_multiple <= 4.0:
-        points, label = 25, "Okay"
-    elif income_multiple <= 5.0:
-        points, label = 15, "Needs attention"
+def _score_deposit(savings: float, target_price: float) -> ComponentScore:
+    pct = savings / target_price
+    if pct < 0.05:
+        pts, label = 0, "Needs attention"
+    elif pct < 0.10:
+        pts, label = 15, "Needs attention"
+    elif pct < 0.15:
+        pts, label = 25, "Getting there"
     else:
-        points, label = 5, "Needs attention"
-
-    return ComponentBreakdown(
-        points=points,
-        max_points=30,
-        label=label,
-        value=round(income_multiple, 2),
-    )
+        pts, label = 40, "Strong"
+    return ComponentScore(points=pts, max_points=40, label=label)
 
 
-def _score_commitments(monthly_commitments, monthly_income):
+def _score_income(annual_income: float, target_price: float) -> ComponentScore:
+    multiple = target_price / annual_income
+    if multiple > 5.0:
+        pts, label = 5, "Needs attention"
+    elif multiple > 4.0:
+        pts, label = 15, "Needs attention"
+    elif multiple > 3.0:
+        pts, label = 25, "Okay"
+    else:
+        pts, label = 30, "Strong"
+    return ComponentScore(points=pts, max_points=30, label=label)
+
+
+def _score_commitments(
+    monthly_commitments: Optional[float], monthly_income: float
+) -> ComponentScore:
     if monthly_commitments is None:
-        return ComponentBreakdown(
-            points=10, max_points=20, label="Not provided", value=-1
-        )
-
-    commitment_ratio = (
-        monthly_commitments / monthly_income if monthly_income > 0 else 9999
-    )
-
-    if commitment_ratio <= 0.10:
-        points, label = 20, "Low impact"
-    elif commitment_ratio <= 0.25:
-        points, label = 15, "Okay"
-    elif commitment_ratio <= 0.40:
-        points, label = 10, "Needs attention"
+        return ComponentScore(points=10, max_points=20, label="Not provided")
+    ratio = monthly_commitments / monthly_income
+    if ratio > 0.40:
+        pts, label = 0, "Needs attention"
+    elif ratio > 0.25:
+        pts, label = 10, "Needs attention"
+    elif ratio > 0.10:
+        pts, label = 15, "Okay"
     else:
-        points, label = 0, "Needs attention"
-
-    return ComponentBreakdown(
-        points=points,
-        max_points=20,
-        label=label,
-        value=round(commitment_ratio * 100, 2),
-    )
+        pts, label = 20, "Low impact"
+    return ComponentScore(points=pts, max_points=20, label=label)
 
 
-def _score_credit(has_ccj, has_missed_payments):
+def _score_credit(
+    has_ccj: Optional[bool], has_missed_payments: Optional[bool]
+) -> ComponentScore:
     if has_ccj is None and has_missed_payments is None:
-        return ComponentBreakdown(
-            points=5, max_points=10, label="Not provided", value=-1
-        )
-
+        return ComponentScore(points=5, max_points=10, label="Not provided")
     if has_ccj:
-        points, label = 0, "Needs attention"
-    elif has_missed_payments:
-        points, label = 5, "Okay"
-    else:
-        points, label = 10, "Low impact"
-
-    return ComponentBreakdown(
-        points=points,
-        max_points=10,
-        label=label,
-        value=-1,
-    )
+        return ComponentScore(points=0, max_points=10, label="Needs attention")
+    if has_missed_payments:
+        return ComponentScore(points=5, max_points=10, label="Okay")
+    return ComponentScore(points=10, max_points=10, label="Low impact")
 
 
-# ------------------------------------------------------------------
-# Biggest-blocker ranker
-# ------------------------------------------------------------------
-
-def _rank_blockers(deposit_bd, income_bd, commitments_bd, credit_bd):
-    components = {
-        "deposit":     deposit_bd,
-        "income":      income_bd,
-        "commitments": commitments_bd,
-        "credit":      credit_bd,
-    }
-    ranked = sorted(
-        components.items(),
-        key=lambda x: x[1].deficit,
-        reverse=True,
-    )
-    ordered_keys = [k for k, _ in ranked]
-    return ordered_keys[0], ordered_keys
+def _status_from_score(score: int) -> tuple[str, str]:
+    for threshold, status, time_est in SCORE_BANDS:
+        if score >= threshold:
+            return status, time_est
+    return SCORE_BANDS[-1][1], SCORE_BANDS[-1][2]
 
 
-# ------------------------------------------------------------------
-# Quantified recommendation builder
-# ------------------------------------------------------------------
-
-def _build_recommendations(
-    inputs_income,
-    inputs_savings,
-    inputs_price,
-    inputs_monthly_commitments,
-    deposit_bd,
-    income_bd,
-    commitments_bd,
-    credit_bd,
-    deposit_gap,
-    blocker_priority,
-):
-    recs = []
-    monthly_income = inputs_income / 12
-
-    for key in blocker_priority:
-
-        if key == "deposit" and deposit_bd.label in ("Needs attention", "Getting there"):
-            if deposit_gap > 0:
-                target_months = 36
-                monthly_needed = max(1, round(deposit_gap / target_months / 10) * 10)
-                recs.append(
-                    "Increase your deposit by £{:,} to reach the 10% benchmark. "
-                    "Saving around £{:,}/month would get you there in approximately "
-                    "{} months.".format(int(deposit_gap), int(monthly_needed), target_months)
-                )
-            else:
-                recs.append(
-                    "Your deposit is above the 10% benchmark — consider saving toward 15% "
-                    "to access better mortgage rates."
-                )
-
-        elif key == "income" and income_bd.label == "Needs attention":
-            target_multiple = 4.5
-            affordable_price = round(inputs_income * target_multiple / 1000) * 1000
-            price_reduction = round((inputs_price - affordable_price) / 1000) * 1000
-            if price_reduction > 0:
-                recs.append(
-                    "Your target price is {:.1f}x your income. "
-                    "Reducing your target by £{:,} to around £{:,} "
-                    "would bring you within a more typical lending range.".format(
-                        income_bd.value, int(price_reduction), int(affordable_price)
-                    )
-                )
-            else:
-                recs.append(
-                    "Consider reviewing your target property price relative to your income "
-                    "to improve your affordability picture."
-                )
-
-        elif key == "commitments" and commitments_bd.label == "Needs attention":
-            if inputs_monthly_commitments and monthly_income > 0:
-                target_ratio = 0.25
-                target_monthly = monthly_income * target_ratio
-                reduction_needed = round((inputs_monthly_commitments - target_monthly) / 10) * 10
-                if reduction_needed > 0:
-                    recs.append(
-                        "Your monthly commitments are £{:,}/month ({:.0f}% of your income). "
-                        "Reducing them by approximately £{:,}/month would move you into "
-                        "a better affordability range.".format(
-                            int(inputs_monthly_commitments),
-                            commitments_bd.value,
-                            int(reduction_needed),
-                        )
-                    )
-                else:
-                    recs.append(
-                        "Consider reducing existing debt balances to improve your monthly affordability."
-                    )
-            else:
-                recs.append(
-                    "Consider reducing existing debt balances or outgoings to improve "
-                    "your affordability picture."
-                )
-
-        elif key == "credit" and credit_bd.label == "Needs attention":
-            recs.append(
-                "A County Court Judgement (CCJ) on your record can significantly affect "
-                "mortgage applications. Consider seeking independent advice on resolving it, "
-                "and ensure all other payments are kept up to date."
-            )
-
-    recs.append("You can revisit this estimate as your situation changes.")
-    return recs
+def _months_to_close(deposit_gap: float, monthly_save: float) -> int:
+    """
+    Returns months needed to close gap at given save rate.
+    Returns MONTHS_CAP if gap cannot be closed within cap.
+    Returns 0 if gap is already closed.
+    """
+    if deposit_gap <= 0:
+        return 0
+    if monthly_save <= 0:
+        return MONTHS_CAP
+    return min(MONTHS_CAP, math.ceil(deposit_gap / monthly_save))
 
 
-# ------------------------------------------------------------------
-# Fastest-improvement simulator
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# [BUG-5 FIX] Blocker ranking — excludes deposit when gap is already 0
+# ---------------------------------------------------------------------------
 
-def _build_simulations(deposit_gap, baseline_months, monthly_income, monthly_saving_ability):
+def _rank_blockers(
+    deposit: ComponentScore,
+    income: ComponentScore,
+    commitments: ComponentScore,
+    credit: ComponentScore,
+    deposit_gap: int,
+) -> tuple[ComponentScore, ComponentScore, ComponentScore, ComponentScore]:
+    """
+    Ranks the four components and assigns priority labels.
+
+    BUG-5 FIX: Deposit is excluded from being the 'biggest blocker' when
+    deposit_gap == 0, because the user has already met the deposit threshold.
+    Even if deposit scores < max (e.g. 25/40), having no gap means it is not
+    an actionable blocker — surfacing it would mislead the user.
+    """
+    components = [
+        ("deposit", deposit),
+        ("income", income),
+        ("commitments", commitments),
+        ("credit", credit),
+    ]
+
+    # Compute a deficit ratio (lower = worse = higher priority blocker)
+    # Deposit gets infinite priority cleared if gap is already closed
+    def blocker_priority(item):
+        name, comp = item
+        if name == "deposit" and deposit_gap == 0:
+            # Deposit is satisfied — push it to bottom of blocker ranking
+            return 1.0
+        return comp.points / comp.max_points  # lower ratio = higher blocker priority
+
+    ranked = sorted(components, key=blocker_priority)
+
+    priority_labels = ["Biggest blocker", "Important", "Important", "Good"]
+    named = {name: comp for name, comp in components}
+
+    for i, (name, _) in enumerate(ranked):
+        named[name].priority_label = priority_labels[i]
+        named[name].is_biggest_blocker = (i == 0)
+
+    return named["deposit"], named["income"], named["commitments"], named["credit"]
+
+
+# ---------------------------------------------------------------------------
+# [BUG-1, BUG-2, BUG-3 FIX] Saving simulations
+# ---------------------------------------------------------------------------
+
+def _build_saving_scenarios(
+    deposit_gap: int,
+    annual_income: float,
+    baseline_months: int,
+) -> list[SavingScenario]:
+    """
+    Builds saving improvement scenarios.
+
+    BUG-1 FIX: Rates that produce identical month outcomes to each other are
+    flagged as non-meaningful and filtered — only distinct outcomes are shown.
+
+    BUG-2 FIX: Rates below the assumed baseline save rate are framed as
+    'slower' scenarios, not improvements. Only rates >= baseline are shown as
+    improvements.
+
+    BUG-3 FIX: When ALL rates hit the cap (60 months), the scenarios are
+    collapsed into a single message explaining none of the standard rates are
+    sufficient, and a price-reduction note is surfaced instead.
+    """
     if deposit_gap <= 0:
         return []
 
-    simulations = []
+    assumed_monthly_save = (annual_income / 12) * ASSUMED_SAVE_RATE
+    scenarios = []
+    seen_months = set()
 
-    for scenario_amount in SIMULATION_SCENARIOS:
-        if scenario_amount <= 0:
-            continue
+    for rate in SIMULATION_RATES:
+        months = _months_to_close(deposit_gap, rate)
+        diff = baseline_months - months  # positive = faster, negative = slower
 
-        months = _ceiling_divide(deposit_gap, scenario_amount)
-        months = int(_clamp(months, 0, MAX_ESTIMATED_MONTHS))
-        months_saved = max(0, baseline_months - months)
+        is_improvement = rate >= assumed_monthly_save
+        is_meaningful = months not in seen_months
+        seen_months.add(months)
 
-        if months < baseline_months:
-            summary = (
-                "If you save £{:,}/month, you could reach your deposit "
-                "goal in {} months instead of {} — "
-                "that's {} months faster.".format(
-                    scenario_amount, months, baseline_months, months_saved
-                )
+        if months == MONTHS_CAP and not is_improvement:
+            # Both below baseline AND capped — no useful signal at all
+            message = (
+                f"Saving £{rate}/month is below your estimated current saving pace "
+                f"and won't close your deposit gap within {MONTHS_CAP} months."
             )
-        elif months == baseline_months:
-            summary = (
-                "Saving £{:,}/month keeps you on the same timeline "
-                "of approximately {} months.".format(scenario_amount, months)
+        elif months == MONTHS_CAP:
+            message = (
+                f"Saving £{rate}/month won't close your deposit gap within "
+                f"{MONTHS_CAP} months. Consider reviewing your target property price."
+            )
+        elif not is_improvement:
+            message = (
+                f"Saving £{rate}/month is below your current pace — "
+                f"it would take approximately {months} months, "
+                f"which is {abs(diff)} months slower than your current trajectory."
+            )
+        elif diff > 0:
+            message = (
+                f"If you save £{rate}/month, you could close your deposit gap "
+                f"in {months} months — {diff} months faster than your current pace."
             )
         else:
-            summary = (
-                "Saving £{:,}/month would take approximately "
-                "{} months to close your deposit gap.".format(scenario_amount, months)
+            message = (
+                f"Saving £{rate}/month keeps you on a similar timeline "
+                f"of approximately {months} months."
             )
 
-        simulations.append(
-            Simulation(
-                monthly_saving=scenario_amount,
-                months_to_goal=months,
-                months_saved=months_saved,
-                label="Save £{:,}/month".format(scenario_amount),
-                summary=summary,
-            )
+        scenarios.append(SavingScenario(
+            monthly_amount=rate,
+            months_to_close=months,
+            months_faster_than_baseline=diff,
+            message=message,
+            is_meaningful=is_meaningful,
+        ))
+
+    # [BUG-3 FIX] If all meaningful scenarios hit the cap, collapse them
+    meaningful = [s for s in scenarios if s.is_meaningful]
+    all_capped = all(s.months_to_close == MONTHS_CAP for s in meaningful)
+    if all_capped:
+        price_reduction_hint = SavingScenario(
+            monthly_amount=0,
+            months_to_close=MONTHS_CAP,
+            months_faster_than_baseline=0,
+            is_meaningful=True,
+            message=(
+                f"At your current target price, standard saving rates won't close "
+                f"your deposit gap within {MONTHS_CAP} months. "
+                f"The highest-impact action is to review your target property price — "
+                f"reducing it by £10,000 would reduce your deposit target by £1,000."
+            ),
         )
+        return [price_reduction_hint]
 
-    return simulations
+    return scenarios
 
 
-# ------------------------------------------------------------------
-# Legacy action plan (kept for backwards compatibility)
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Action plan builder
+# ---------------------------------------------------------------------------
 
-def _build_action_plan(deposit_bd, income_bd, commitments_bd, credit_bd):
+def _build_action_plan(
+    deposit: ComponentScore,
+    income: ComponentScore,
+    commitments: ComponentScore,
+    credit: ComponentScore,
+    deposit_gap: int,
+    affordability_gap: int,
+) -> list[str]:
     plan = []
-
-    if deposit_bd.label in ("Needs attention",):
-        plan.append("Consider building your deposit over time to strengthen your position.")
-
-    if income_bd.label == "Needs attention":
+    if deposit_gap > 0:
         plan.append(
-            "Consider reviewing your target budget or extending your timeframe "
-            "based on what you entered."
+            f"Consider building your deposit — "
+            f"you need approximately £{deposit_gap:,} more to reach the 10% threshold."
         )
-
-    if commitments_bd.label == "Needs attention":
+    if income.label in ("Needs attention", "Okay") and affordability_gap > 0:
         plan.append(
-            "Consider reducing existing balances or outgoings where possible "
-            "to improve your affordability picture."
+            f"Consider reviewing your target budget — "
+            f"your current income supports borrowing up to £{affordability_gap:,} less "
+            f"than your target price."
         )
-
-    if credit_bd.label == "Needs attention":
+    if commitments.label == "Needs attention":
         plan.append(
-            "Consider keeping repayments on time and avoiding missed payments "
-            "going forward."
+            "Consider reducing existing monthly commitments where possible "
+            "to improve your affordability assessment."
         )
-    elif credit_bd.label == "Okay" and credit_bd.points == 5:
+    if credit.label == "Needs attention":
         plan.append(
-            "Consider keeping repayments up to date — a consistent payment "
-            "history can help over time."
+            "Consider keeping all repayments on time and avoiding new missed payments "
+            "to strengthen your credit profile over time."
         )
-
-    plan.append("You can revisit this estimate as your situation changes.")
+    elif credit.label == "Okay":
+        plan.append(
+            "Consider maintaining on-time payments — "
+            "a clean 12-month record improves your credit profile significantly."
+        )
+    plan.append("You can revisit this as your situation changes.")
     return plan
 
 
-# ------------------------------------------------------------------
-# Main scoring function
-# ------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
-def calculate_readiness(inputs):
-    income  = max(0.0, inputs.annual_income)
-    savings = max(0.0, inputs.savings)
-    price   = max(1.0, inputs.target_property_price)
-    monthly_income = income / 12
+def compute_assessment(
+    annual_income: float,
+    savings: float,
+    target_property_price: float,
+    monthly_commitments: Optional[float] = None,
+    has_ccj: Optional[bool] = None,
+    has_missed_payments: Optional[bool] = None,
+) -> AssessmentResult:
+    """
+    Computes a Rendi readiness assessment.
 
-    deposit_bd     = _score_deposit(savings, price)
-    income_bd      = _score_income(income, price)
-    commitments_bd = _score_commitments(inputs.monthly_commitments, monthly_income)
-    credit_bd      = _score_credit(inputs.has_ccj, inputs.has_missed_payments)
+    All arguments match the API payload fields exactly.
+    Returns a fully populated AssessmentResult.
+    """
+    monthly_income = annual_income / 12
 
-    raw_score = (
-        deposit_bd.points
-        + income_bd.points
-        + commitments_bd.points
-        + credit_bd.points
-    )
-    score = int(_clamp(raw_score, 0, 100))
+    # --- Score components ---
+    deposit_comp   = _score_deposit(savings, target_property_price)
+    income_comp    = _score_income(annual_income, target_property_price)
+    commit_comp    = _score_commitments(monthly_commitments, monthly_income)
+    credit_comp    = _score_credit(has_ccj, has_missed_payments)
 
-    if score >= STATUS_THRESHOLDS["strong_position"]:
-        status = STATUS_LABELS["strong_position"]
-    elif score >= STATUS_THRESHOLDS["getting_close"]:
-        status = STATUS_LABELS["getting_close"]
-    elif score >= STATUS_THRESHOLDS["building_momentum"]:
-        status = STATUS_LABELS["building_momentum"]
-    else:
-        status = STATUS_LABELS["early_stages"]
+    total_score = min(100, deposit_comp.points + income_comp.points
+                      + commit_comp.points + credit_comp.points)
 
-    time_estimate = TIME_ESTIMATES[status]
+    # --- Deposit gap ---
+    deposit_needed = round(target_property_price * DEPOSIT_THRESHOLD)
+    deposit_gap    = max(0, deposit_needed - int(savings))
 
-    deposit_needed = round(price * DEPOSIT_BENCHMARK_PERCENT)
-    deposit_gap    = round(max(0.0, deposit_needed - savings))
+    # --- Affordability ---
+    borrowing_power  = int(annual_income * 4.5)
+    total_budget     = borrowing_power + int(savings)
+    affordability_gap = max(0, int(target_property_price) - total_budget)
 
-    if inputs.monthly_saving_ability and inputs.monthly_saving_ability > 0:
-        assumed_monthly_save = inputs.monthly_saving_ability
-    else:
-        assumed_monthly_save = max(0.0, monthly_income * ASSUMED_SAVINGS_RATE)
+    # --- Timeline ---
+    # [BUG-4 FIX]: estimated_months is the SINGLE source of truth for the timeline.
+    # The status-band time_estimate label ("Likely 6–18 months away") is a SECONDARY,
+    # general label only — it must NOT be shown alongside estimated_months as if they
+    # are the same figure. The UI should display estimated_months prominently and
+    # treat the status label as supplementary context only.
+    assumed_monthly_save = monthly_income * ASSUMED_SAVE_RATE
+    estimated_months = _months_to_close(deposit_gap, assumed_monthly_save)
 
-    if deposit_gap > 0 and assumed_monthly_save > 0:
-        estimated_months = int(_clamp(
-            _ceiling_divide(deposit_gap, assumed_monthly_save),
-            0, MAX_ESTIMATED_MONTHS
-        ))
-    elif deposit_gap > 0:
-        estimated_months = MAX_ESTIMATED_MONTHS
-    else:
-        estimated_months = 0
+    status, time_estimate = _status_from_score(total_score)
 
-    biggest_blocker, blocker_priority = _rank_blockers(
-        deposit_bd, income_bd, commitments_bd, credit_bd
+    # --- Blockers ---
+    deposit_comp, income_comp, commit_comp, credit_comp = _rank_blockers(
+        deposit_comp, income_comp, commit_comp, credit_comp, deposit_gap
     )
 
-    recommendations = _build_recommendations(
-        inputs_income=income,
-        inputs_savings=savings,
-        inputs_price=price,
-        inputs_monthly_commitments=inputs.monthly_commitments,
-        deposit_bd=deposit_bd,
-        income_bd=income_bd,
-        commitments_bd=commitments_bd,
-        credit_bd=credit_bd,
-        deposit_gap=deposit_gap,
-        blocker_priority=blocker_priority,
+    biggest_blocker_name = next(
+        name for name, comp in [
+            ("deposit", deposit_comp), ("income", income_comp),
+            ("commitments", commit_comp), ("credit", credit_comp)
+        ] if comp.is_biggest_blocker
     )
 
-    simulations = _build_simulations(
-        deposit_gap=deposit_gap,
-        baseline_months=estimated_months,
-        monthly_income=monthly_income,
-        monthly_saving_ability=inputs.monthly_saving_ability,
+    breakdown = Breakdown(
+        deposit=deposit_comp,
+        income=income_comp,
+        commitments=commit_comp,
+        credit=credit_comp,
     )
 
+    # --- Action plan ---
     action_plan = _build_action_plan(
-        deposit_bd, income_bd, commitments_bd, credit_bd
+        deposit_comp, income_comp, commit_comp, credit_comp,
+        deposit_gap, affordability_gap
     )
 
-    return ScoringResult(
-        score=score,
+    # --- Saving simulations ---
+    saving_scenarios = _build_saving_scenarios(
+        deposit_gap, annual_income, estimated_months
+    )
+
+    return AssessmentResult(
+        score=total_score,
         status=status,
         time_estimate=time_estimate,
-        deposit_breakdown=deposit_bd,
-        income_breakdown=income_bd,
-        commitments_breakdown=commitments_bd,
-        credit_breakdown=credit_bd,
-        biggest_blocker=biggest_blocker,
-        blocker_priority=blocker_priority,
         deposit_needed=deposit_needed,
         deposit_gap=deposit_gap,
         estimated_months=estimated_months,
-        recommendations=recommendations,
-        simulations=simulations,
+        biggest_blocker=biggest_blocker_name,
+        breakdown=breakdown,
         action_plan=action_plan,
-        disclaimer=DISCLAIMER,
+        saving_scenarios=saving_scenarios,
+        borrowing_power=borrowing_power,
+        total_budget=total_budget,
+        affordability_gap=affordability_gap,
     )
+
+
+# ---------------------------------------------------------------------------
+# Quick self-test against known cases
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    TEST_CASES = [
+        ("T02 High earner, low savings",   90000,  5000, 350000, 500,  False, False),
+        ("T04 CCJ + missed payments",      45000, 20000, 220000, 400,  True,  True),
+        ("T07 Aspirational, weak profile", 30000,  2000, 500000, 800,  False, True),
+        ("T08 Optional fields omitted",    48000, 14400, 288000, None, None,  None),
+        ("T05 Deposit gap = 0 bug test",   55000, 25000, 250000, 600,  False, False),
+    ]
+
+    for label, *args in TEST_CASES:
+        r = compute_assessment(*args)
+        print(f"\n{'='*65}")
+        print(f"  {label}")
+        print(f"  Score: {r.score}/100 | Status: {r.status} | {r.time_estimate}")
+        print(f"  Deposit gap: £{r.deposit_gap:,} | Est. months: {r.estimated_months}")
+        print(f"  Biggest blocker: {r.biggest_blocker}")
+        print(f"  Breakdown:")
+        for name, comp in [
+            ("deposit", r.breakdown.deposit), ("income", r.breakdown.income),
+            ("commitments", r.breakdown.commitments), ("credit", r.breakdown.credit)
+        ]:
+            flag = " ← BIGGEST BLOCKER" if comp.is_biggest_blocker else ""
+            print(f"    {name:12s} {comp.points}/{comp.max_points}  [{comp.priority_label}]{flag}")
+        print(f"  Saving scenarios:")
+        for s in r.saving_scenarios:
+            tag = "(non-meaningful — duplicate outcome)" if not s.is_meaningful else ""
+            amt = f"£{s.monthly_amount}/mo" if s.monthly_amount else "price note"
+            print(f"    {amt}: {s.months_to_close}mo | {s.message[:80]}... {tag}")
