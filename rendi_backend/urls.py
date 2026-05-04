@@ -1,6 +1,11 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
 from rest_framework_simplejwt.views import TokenRefreshView
+
+
+def health(request):
+    return JsonResponse({"status": "ok"})
 
 # ------------------------------------------------------------------
 # Admin cosmetics
@@ -11,6 +16,9 @@ admin.site.index_title = "Welcome to Rendi"
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+
+    # Health check 
+    path("", health),
 
     # Auth endpoints
     path("api/auth/", include("apps.users.urls")),
