@@ -12,15 +12,16 @@ Required environment variables (set in your hosting dashboard):
   ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, FRONTEND_URL,
   DEFAULT_FROM_EMAIL, EMAIL_FROM_NAME
 """
-
+ 
 from .base import *  # noqa: F401, F403
 
+
 # -----------------------------------------------------------------
-# PyMySQL setup to allow using MySQL with Django's MySQLdb backend
+#  PyMySQL setup to allow using MySQL with Django's MySQLdb backend
 # -----------------------------------------------------------------
 import pymysql
 
-pymysql.version_info = (2, 2, 8, "final", 0)  # Satisfy Django version check
+pymysql.version_info = (2, 2, 8, "final", 0)  # Manually spoof the version to satisfy Django
 pymysql.install_as_MySQLdb()
 
 import dj_database_url
@@ -34,13 +35,16 @@ DEBUG = False
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="").split(",")
 
 # ------------------------------------------------------------------
-# Database — MySQL via DB_URL
+# Database — MySQL via DATABASE_URL
 # ------------------------------------------------------------------
 DATABASES = {
     "default": dj_database_url.config(
         default=config("DB_URL"),
         conn_max_age=600,
-        ssl_require=False, # Standard for many shared cPanel/MySQL hosts[cite: 1]
+        # SSL is handled differently in MySQL; 
+        # many shared cPanel hosts don't support enforced SSL for remote DBs 
+        # unless specifically configured. Start with False if you get errors.
+        ssl_require=False, 
     )
 }
 
@@ -77,9 +81,8 @@ X_FRAME_OPTIONS = "DENY"
 # We use a dummy backend because service.py calls the Resend API directly.
 # This prevents Django from trying to connect to a local SMTP server.
 EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
-
 # ------------------------------------------------------------------
-# Celery — Redis broker
+# Celery — Redis broker (Upstash, Railway Redis, etc.)
 # ------------------------------------------------------------------
 CELERY_BROKER_URL = config("REDIS_URL")
 CELERY_RESULT_BACKEND = config("REDIS_URL")
