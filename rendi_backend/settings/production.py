@@ -12,7 +12,7 @@ Required environment variables (set in your hosting dashboard):
   ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, FRONTEND_URL,
   DEFAULT_FROM_EMAIL, EMAIL_FROM_NAME
 """
-
+ 
 from .base import *  # noqa: F401, F403
 import dj_database_url
 from decouple import config
@@ -31,8 +31,17 @@ DATABASES = {
     "default": dj_database_url.config(
         default=config("DB_URL"),
         conn_max_age=600,
-        ssl_require=True,
+        # SSL is handled differently in MySQL; 
+        # many shared cPanel hosts don't support enforced SSL for remote DBs 
+        # unless specifically configured. Start with False if you get errors.
+        ssl_require=False, 
     )
+}
+
+# Ensure MySQL works correctly with Django
+DATABASES["default"]["OPTIONS"] = {
+    'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+    'charset': 'utf8mb4',
 }
 
 # ------------------------------------------------------------------

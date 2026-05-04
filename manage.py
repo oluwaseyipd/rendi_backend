@@ -2,6 +2,8 @@
 import os
 import sys
 
+import pymysql
+pymysql.install_as_MySQLdb()
 
 def main():
     # Ensure the project root is always on sys.path
