@@ -14,6 +14,16 @@ Required environment variables (set in your hosting dashboard):
 """
  
 from .base import *  # noqa: F401, F403
+
+
+# -----------------------------------------------------------------
+#  PyMySQL setup to allow using MySQL with Django's MySQLdb backend
+# -----------------------------------------------------------------
+import pymysql
+
+pymysql.version_info = (2, 2, 8, "final", 0)  # Manually spoof the version to satisfy Django
+pymysql.install_as_MySQLdb()
+
 import dj_database_url
 from decouple import config
 
