@@ -153,18 +153,17 @@ STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ------------------------------------------------------------------
-# Email (SendGrid via SMTP — works in both envs, key differs)
+# Email (Resend — direct API, not SMTP)
 # ------------------------------------------------------------------
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = "smtp.sendgrid.net"
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = "apikey"
-EMAIL_HOST_PASSWORD = config("SENDGRID_API_KEY", default="")
-DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="hello@rendi.co")
+# Resend does not use Django's SMTP email backend.
+# All sending goes through the Resend Python SDK in apps/emails/service.py.
+# The settings below are used by service.py directly.
+
+RESEND_API_KEY = config("RESEND_API_KEY", default="")
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="info@rendi.co.uk")
 EMAIL_FROM_NAME = config("EMAIL_FROM_NAME", default="Team Rendi")
 
-# Full sender string e.g. "Team Rendi <hello@rendi.co>"
+# Full sender string e.g. "Team Rendi <info@rendi.co.uk>"
 EMAIL_FROM = f"{EMAIL_FROM_NAME} <{DEFAULT_FROM_EMAIL}>"
 
 # ------------------------------------------------------------------

@@ -1,38 +1,46 @@
-# Core
-Django>=5.1.7
+amqp==5.3.1
+asgiref==3.11.1
+billiard==4.2.4
+celery==5.3.6
+certifi==2026.4.22
+charset-normalizer==3.4.7
+click==8.3.2
+click-didyoumean==0.3.1
+click-plugins==1.1.1.2
+click-repl==0.3.0
+colorama==0.4.6
+cron-descriptor==1.4.5
+dj-database-url==3.1.2
+Django==6.0.4
+django-celery-beat==2.9.0
+django-cors-headers==4.9.0
+django-timezone-field==7.2.1
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
-
-# Database
-psycopg2-binary==2.9.11
-dj-database-url==3.1.2
-pymysql==1.1.2
-mysqlclient==2.2.8
-
-# Server & static
 gunicorn==25.3.0
-whitenoise==6.12.0
-
-# Environment
+idna==3.13
+kombu==5.6.2
+mysqlclient==2.2.8
+packaging==26.0
+pillow==12.1.1
+prompt_toolkit==3.0.52
+psycopg2-binary==2.9.11
+PyJWT==2.12.1
+PyMySQL==1.1.2
+python-crontab==3.3.0
+python-dateutil==2.9.0.post0
 python-decouple==3.8
 python-dotenv==1.2.2
-
-# CORS
-django-cors-headers==4.9.0
-
-# Phase 3: Async task queue
-celery==5.3.6
+python-http-client==3.3.7
 redis==5.0.1
-django-celery-beat>=2.7.0
-
-# Phase 3: Email
-sendgrid==6.11.0
-
-# Utilities
-Pillow==12.1.1
-PyJWT==2.12.1
-asgiref==3.11.1
+requests==2.33.1
+resend==2.30.0
+six==1.17.0
 sqlparse==0.5.5
+starkbank-ecdsa==2.2.0
+typing_extensions==4.15.0
 tzdata==2025.3
-packaging==26.0
-
+urllib3==2.6.3
+vine==5.1.0
+wcwidth==0.6.0
+whitenoise==6.12.0

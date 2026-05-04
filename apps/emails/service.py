@@ -7,7 +7,7 @@ All 11 email types from the spec are implemented here as standalone
 functions. Each function:
   1. Checks the EmailLog to prevent duplicate sends
   2. Builds the subject + plain-text body using exact copy from spec
-  3. Sends via Django's email backend (console in dev, SendGrid in prod)
+  3. Sends via Resend API (resend Python SDK)
   4. Writes an EmailLog record (success or failure)
 
 All monetary values passed in should be plain integers/floats (no £ symbol).
@@ -17,13 +17,16 @@ Formatting is applied inside each function.
 import logging
 from datetime import timedelta
 
+import resend
 from django.conf import settings
-from django.core.mail import send_mail
 from django.utils import timezone
 
 from .models import EmailLog
 
 logger = logging.getLogger(__name__)
+
+# Initialise Resend once at module load
+resend.api_key = settings.RESEND_API_KEY
 
 
 # ------------------------------------------------------------------
@@ -57,13 +60,12 @@ def _send(user, email_type: str, subject: str, body: str, assessment=None) -> bo
     """
     from_email = getattr(settings, "EMAIL_FROM", settings.DEFAULT_FROM_EMAIL)
     try:
-        send_mail(
-            subject=subject,
-            message=body,
-            from_email=from_email,
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        resend.Emails.send({
+            "from":    from_email,
+            "to":      [user.email],
+            "subject": subject,
+            "text":    body,
+        })
         EmailLog.objects.create(
             user=user,
             email_type=email_type,
@@ -84,7 +86,7 @@ def _send(user, email_type: str, subject: str, body: str, assessment=None) -> bo
         )
         logger.error(
             "Email failed | type=%s | to=%s | error=%s",
-            email_type, user.email, exc
+            email_type, user.email, exc,
         )
         return False
 
@@ -280,13 +282,17 @@ def send_deposit_blocker_email(user, assessment) -> bool:
 
     deposit_gap = _fmt_currency(assessment.deposit_gap)
 
-    # Pick the middle simulation scenario (£500/month) if available
+    # Pick the £500/month scenario if available and meaningful
     simulations = assessment.simulations or []
-    mid_sim = next((s for s in simulations if s.get("monthly_saving") == 500), None)
+    mid_sim = next(
+        (s for s in simulations
+         if s.get("monthly_amount") == 500 and s.get("is_meaningful")),
+        None,
+    )
     if mid_sim:
-        monthly_saving = _fmt_currency(mid_sim["monthly_saving"])
-        months_to_goal = mid_sim["months_to_goal"]
-        sim_line = f"Saving {monthly_saving} per month could help you reach your goal in {months_to_goal} months."
+        monthly_amount = _fmt_currency(mid_sim["monthly_amount"])
+        months_to_close = mid_sim["months_to_close"]
+        sim_line = f"Saving {monthly_amount} per month could help you reach your goal in {months_to_close} months."
     else:
         sim_line = "Building your deposit consistently each month will improve your position over time."
 
@@ -318,19 +324,27 @@ def send_fastest_improvement_email(user, assessment) -> bool:
     if _already_sent(user, EmailLog.FASTEST_IMPROVEMENT, within_days=30):
         return False
 
-    # Use the highest saving scenario
-    best_sim = max(simulations, key=lambda s: s.get("months_saved", 0))
-    if best_sim.get("months_saved", 0) <= 0:
+    # Use the meaningful scenario with the highest months_faster_than_baseline
+    # Exclude price-reduction notes (monthly_amount == 0)
+    meaningful = [
+        s for s in simulations
+        if s.get("is_meaningful") and s.get("monthly_amount", 0) > 0
+    ]
+    if not meaningful:
         return False
 
-    scenario_saving = _fmt_currency(best_sim["monthly_saving"])
+    best_sim = max(meaningful, key=lambda s: s.get("months_faster_than_baseline", 0))
+    if best_sim.get("months_faster_than_baseline", 0) <= 0:
+        return False
+
+    scenario_saving = _fmt_currency(best_sim["monthly_amount"])
 
     subject = "This could get you there faster"
     body = f"""Hi {user.first_name or 'there'},
 
 If you save {scenario_saving} per month, you could reduce your timeline significantly.
 
-{best_sim.get('summary', '')}
+{best_sim.get('message', '')}
 
 Explore your updated plan: {settings.FRONTEND_URL}/dashboard/result
 
