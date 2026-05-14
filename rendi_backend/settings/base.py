@@ -183,3 +183,10 @@ FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 # ------------------------------------------------------------------
 COMPARISON_MIN_TOTAL_USERS = 100
 COMPARISON_MIN_SEGMENT_USERS = 30
+
+
+#---------------------------------------------------------------------
+# Cron job secret (for scheduled emails endpoint)
+#---------------------------------------------------------------------
+
+CRON_SECRET = config("CRON_SECRET", default="")

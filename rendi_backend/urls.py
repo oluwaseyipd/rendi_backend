@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.urls import path, include
 from django.http import JsonResponse
 from rest_framework_simplejwt.views import TokenRefreshView
+from apps.emails.views import run_scheduled_emails
+
 
 
 def health(request):
@@ -16,6 +18,9 @@ admin.site.index_title = "Welcome to Rendi"
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+
+    # Internal API for scheduled tasks (sending emails)
+    path("api/internal/run-scheduled-emails/", run_scheduled_emails),
 
     # Health check 
     path("", health),
@@ -32,3 +37,4 @@ urlpatterns = [
     # Phase 4: Referrals
     path("api/referrals/", include("apps.referrals.urls")),
 ]
+
