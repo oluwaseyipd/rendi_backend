@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.db import models
 
-
+ 
 class EmailLog(models.Model):
     """
     Records every email sent to a user.

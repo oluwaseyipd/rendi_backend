@@ -83,7 +83,7 @@ EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
 # ------------------------------------------------------------------
 CELERY_BROKER_URL = config("REDIS_URL")
 CELERY_RESULT_BACKEND = config("REDIS_URL")
-
+ 
 # ------------------------------------------------------------------
 # Logging
 # ------------------------------------------------------------------

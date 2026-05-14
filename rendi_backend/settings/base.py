@@ -174,6 +174,12 @@ CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60
 
 # ------------------------------------------------------------------
+# Celery — Redis broker
+# ------------------------------------------------------------------
+CELERY_BROKER_URL = config("REDIS_URL")
+CELERY_RESULT_BACKEND = config("REDIS_URL")
+
+# ------------------------------------------------------------------
 # Frontend URL (used in email links)
 # ------------------------------------------------------------------
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")

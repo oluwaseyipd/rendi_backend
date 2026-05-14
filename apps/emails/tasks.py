@@ -98,7 +98,7 @@ def send_post_assessment_emails_task(self, user_id: int, assessment_id: int):
     except Exception as exc:
         logger.error("send_post_assessment_emails_task failed: %s", exc)
         raise self.retry(exc=exc)
-
+ 
 
 # ------------------------------------------------------------------
 # Scheduled tasks (run via Celery Beat — set up in production)

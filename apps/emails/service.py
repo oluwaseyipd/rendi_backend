@@ -175,7 +175,7 @@ Next step:
 
 View your full plan: {settings.FRONTEND_URL}/dashboard/result
 
-{referral_line}
+{referral_line} 
 — Team Rendi
 
 This is an estimate for information only. Not financial advice."""
