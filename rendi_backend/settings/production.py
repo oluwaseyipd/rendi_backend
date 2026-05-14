@@ -84,8 +84,11 @@ EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
 # ------------------------------------------------------------------
 # Celery — Redis broker (Upstash, Railway Redis, etc.)
 # ------------------------------------------------------------------
-CELERY_BROKER_URL = config("REDIS_URL")
-CELERY_RESULT_BACKEND = config("REDIS_URL")
+raw_redis_url = config("REDIS_URL")
+if raw_redis_url and not raw_redis_url.startswith(("redis://", "rediss://")):
+    raw_redis_url = f"redis://{raw_redis_url}"
+CELERY_BROKER_URL = raw_redis_url
+CELERY_RESULT_BACKEND = raw_redis_url
 
 # ------------------------------------------------------------------
 # Logging

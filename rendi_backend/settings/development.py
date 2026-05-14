@@ -62,7 +62,10 @@ EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 # ------------------------------------------------------------------
 CELERY_TASK_ALWAYS_EAGER = True          # tasks run synchronously
 CELERY_TASK_EAGER_PROPAGATES = True      # exceptions surface immediately
-CELERY_BROKER_URL = config("REDIS_URL", default="memory://")
+raw_redis_url = config("REDIS_URL", default="memory://")
+if raw_redis_url and not raw_redis_url.startswith(("redis://", "rediss://", "memory://")):
+    raw_redis_url = f"redis://{raw_redis_url}"
+CELERY_BROKER_URL = raw_redis_url
 CELERY_RESULT_BACKEND = "cache+memory://"
 
 # ------------------------------------------------------------------
