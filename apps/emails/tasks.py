@@ -1,17 +1,16 @@
 """
 apps/emails/tasks.py
 ---------------------
-Celery tasks for all Rendi email triggers.
+Email trigger functions for Rendi.
 
-In development: tasks run synchronously (CELERY_TASK_ALWAYS_EAGER=True).
-In production: tasks run async via Redis broker.
+Celery has been removed for the MVP — all functions call service.py directly
+and run synchronously. This means no Redis broker or worker process is needed.
 
-Each task is designed to be safe to retry — all sending logic is
-idempotent (duplicate checks live in service.py).
+When you're ready to add Celery back in a later stage, replace each function
+body with the equivalent @shared_task and .delay() call.
 """
 
 import logging
-from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
@@ -23,8 +22,7 @@ User = get_user_model()
 # Triggered immediately after events
 # ------------------------------------------------------------------
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_welcome_email_task(self, user_id: int):
+def send_welcome_email_task(user_id: int):
     """Trigger: user_signed_up"""
     try:
         from apps.emails.service import send_welcome_email
@@ -34,11 +32,9 @@ def send_welcome_email_task(self, user_id: int):
         logger.warning("send_welcome_email_task: user %s not found", user_id)
     except Exception as exc:
         logger.error("send_welcome_email_task failed: %s", exc)
-        raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_results_email_task(self, user_id: int, assessment_id: int):
+def send_results_email_task(user_id: int, assessment_id: int):
     """Trigger: assessment_completed"""
     try:
         from apps.emails.service import send_results_email
@@ -46,13 +42,11 @@ def send_results_email_task(self, user_id: int, assessment_id: int):
         user = User.objects.get(pk=user_id)
         assessment = Assessment.objects.get(pk=assessment_id)
         send_results_email(user, assessment)
-    except (User.DoesNotExist, Exception) as exc:
+    except Exception as exc:
         logger.error("send_results_email_task failed: %s", exc)
-        raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_progress_email_task(self, user_id: int, assessment_id: int, previous_score: int):
+def send_progress_email_task(user_id: int, assessment_id: int, previous_score: int):
     """Trigger: assessment_updated with score improvement"""
     try:
         from apps.emails.service import send_progress_email
@@ -62,19 +56,12 @@ def send_progress_email_task(self, user_id: int, assessment_id: int, previous_sc
         send_progress_email(user, assessment, previous_score)
     except Exception as exc:
         logger.error("send_progress_email_task failed: %s", exc)
-        raise self.retry(exc=exc)
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def send_post_assessment_emails_task(self, user_id: int, assessment_id: int):
+def send_post_assessment_emails_task(user_id: int, assessment_id: int):
     """
     Runs immediately after assessment submission.
-    Sends contextual emails based on the result:
-      - Results email (always)
-      - Deposit blocker email (if deposit is biggest blocker)
-      - Fastest improvement email (if simulations show meaningful gain)
-      - Near ready email (if score is Getting close / Strong position)
-      - Advisor ready email (if all thresholds met)
+    Sends contextual emails based on the result.
     """
     try:
         from apps.emails.service import (
@@ -97,23 +84,18 @@ def send_post_assessment_emails_task(self, user_id: int, assessment_id: int):
 
     except Exception as exc:
         logger.error("send_post_assessment_emails_task failed: %s", exc)
-        raise self.retry(exc=exc)
 
 
 # ------------------------------------------------------------------
-# Scheduled tasks (run via Celery Beat — set up in production)
+# Scheduled tasks
+# These are intended to be called by a daily cron job
+# (e.g. Render Cron Job or GitHub Actions hitting a management command).
 # ------------------------------------------------------------------
 
-@shared_task
 def send_inactivity_reminders_task():
     """
     Checks all users and sends reminder emails based on inactivity.
-    Should be scheduled to run daily via Celery Beat.
-
-    Logic:
-      - 7 days since last assessment and no 7-day reminder sent
-      - 14 days since last assessment and no 14-day reminder sent
-      - 30 days since last assessment and no 30-day reminder sent
+    Call this daily via a cron job.
     """
     from apps.emails.service import (
         send_reminder_7_email,
@@ -125,7 +107,6 @@ def send_inactivity_reminders_task():
     now = timezone.now()
     sent_count = 0
 
-    # Get all users who have at least one assessment
     user_ids = Assessment.objects.values_list("user_id", flat=True).distinct()
     users = User.objects.filter(pk__in=user_ids)
 
@@ -154,12 +135,11 @@ def send_inactivity_reminders_task():
     return sent_count
 
 
-@shared_task
 def send_advisor_followup_task():
     """
     Checks for users who received an advisor_ready email 7+ days ago
     but haven't received a follow-up yet.
-    Should be scheduled to run daily via Celery Beat.
+    Call this daily via a cron job.
     """
     from apps.emails.service import send_advisor_followup_email
     from apps.emails.models import EmailLog

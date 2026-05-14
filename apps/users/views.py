@@ -5,6 +5,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from apps.emails.service import send_welcome_email
+
 from .serializers import (
     RegisterSerializer,
     UserProfileSerializer,
@@ -63,8 +65,8 @@ class RegisterView(generics.CreateAPIView):
 
         # Phase 3: fire welcome email asynchronously
         try:
-            from apps.emails.tasks import send_welcome_email_task
-            send_welcome_email_task.delay(user.pk)
+            from apps.emails.service import send_welcome_email
+            send_welcome_email(user)
         except Exception as exc:
             logger.error("Welcome email task failed for user %s: %s", user.pk, exc)
 
