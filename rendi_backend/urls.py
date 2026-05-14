@@ -1,23 +1,40 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.http import JsonResponse
 from rest_framework_simplejwt.views import TokenRefreshView
+from apps.emails.views import run_scheduled_emails
+
+
+
+def health(request):
+    return JsonResponse({"status": "ok"})
 
 # ------------------------------------------------------------------
 # Admin cosmetics
 # ------------------------------------------------------------------
 admin.site.site_header = "Rendi Admin"
-admin.site.site_title = "Rendi Admin Portal"
+admin.site.site_title  = "Rendi Admin Portal"
 admin.site.index_title = "Welcome to Rendi"
 
 urlpatterns = [
     path("admin/", admin.site.urls),
 
+    # Internal API for scheduled tasks (sending emails)
+    path("api/internal/run-scheduled-emails/", run_scheduled_emails),
+
+    # Health check 
+    path("", health),
+
     # Auth endpoints
     path("api/auth/", include("apps.users.urls")),
 
-    # JWT token refresh (shared utility endpoint)
+    # JWT token refresh
     path("api/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # Assessments
     path("api/assessments/", include("apps.assessments.urls")),
+
+    # Phase 4: Referrals
+    path("api/referrals/", include("apps.referrals.urls")),
 ]
+
