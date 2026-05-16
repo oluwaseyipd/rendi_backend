@@ -83,8 +83,8 @@ EMAIL_BACKEND = "django.core.mail.backends.dummy.EmailBackend"
 # ------------------------------------------------------------------
 CELERY_BROKER_URL = config("REDIS_URL")
 CELERY_RESULT_BACKEND = config("REDIS_URL")
-# CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
-# CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
+CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
+CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
 # ------------------------------------------------------------------
 # Logging
 # ------------------------------------------------------------------

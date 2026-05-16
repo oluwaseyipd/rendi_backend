@@ -8,7 +8,7 @@ Do not import this file directly — import development.py or production.py.
 from pathlib import Path
 from datetime import timedelta
 from decouple import config
-# import ssl
+import ssl
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -179,8 +179,8 @@ CELERY_TASK_TIME_LIMIT = 30 * 60
 # ------------------------------------------------------------------
 CELERY_BROKER_URL = config("REDIS_URL")
 CELERY_RESULT_BACKEND = config("REDIS_URL")
-# CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
-# CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
+CELERY_BROKER_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
+CELERY_REDIS_BACKEND_USE_SSL = {"ssl_cert_reqs": ssl.CERT_NONE}
 
 # ------------------------------------------------------------------
 # Frontend URL (used in email links)
