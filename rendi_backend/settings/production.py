@@ -50,6 +50,10 @@ DATABASES["default"]["OPTIONS"] = {
     'charset': 'utf8mb4',
 }
 
+
+# Ensure persistent connections for production performance
+DATABASES["default"]["CONN_MAX_AGE"] = 60
+
 # ------------------------------------------------------------------
 # CORS
 # ------------------------------------------------------------------

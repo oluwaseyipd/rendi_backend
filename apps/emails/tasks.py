@@ -14,6 +14,7 @@ import logging
 from celery import shared_task
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.db import close_old_connections
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -76,6 +77,10 @@ def send_post_assessment_emails_task(self, user_id: int, assessment_id: int):
       - Near ready email (if score is Getting close / Strong position)
       - Advisor ready email (if all thresholds met)
     """
+
+    close_old_connections()
+
+
     try:
         from apps.emails.service import (
             send_results_email,
@@ -98,6 +103,9 @@ def send_post_assessment_emails_task(self, user_id: int, assessment_id: int):
     except Exception as exc:
         logger.error("send_post_assessment_emails_task failed: %s", exc)
         raise self.retry(exc=exc)
+    
+    finally:
+        close_old_connections()
  
 
 # ------------------------------------------------------------------
